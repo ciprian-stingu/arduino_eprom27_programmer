@@ -75,7 +75,7 @@ void MainWindow::OpenSerialPort(QString path)
         while(serialPort->waitForReadyRead(5000))
         {
             readData.append(serialPort->readAll());
-            Log(readData);
+            //Log(readData);
             if(readData.indexOf(PROGRAMMER_NAME, 0) != -1)
             {
                 Log(QString("Connect successful"));
@@ -184,10 +184,10 @@ void MainWindow::UpdateButtonsOnConnect(void)
 
 void MainWindow::UpdateButtons(void)
 {
-    Log("UpdateButtons [" + QString::number(!!updateVoltageTimerConnection) + ", " + QString::number(selectedChip)
-        + ", " + QString::number(fileLoaded) + ", " + QString::number(chipRead) + ", " + QString::number(chipWritten)
-        + ", " + QString::number(!!checkClearConnection) + ", " + QString::number(!!writeEndConnection)
-        + ", " + QString::number(!!verifyDataWrittenConnection) + "]");
+    //Log("UpdateButtons [" + QString::number(!!updateVoltageTimerConnection) + ", " + QString::number(selectedChip)
+    //    + ", " + QString::number(fileLoaded) + ", " + QString::number(chipRead) + ", " + QString::number(chipWritten)
+    //    + ", " + QString::number(!!checkClearConnection) + ", " + QString::number(!!writeEndConnection)
+    //    + ", " + QString::number(!!verifyDataWrittenConnection) + "]");
 
     if(updateVoltageTimerConnection)
     {
