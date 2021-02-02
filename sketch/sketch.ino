@@ -2,38 +2,58 @@
 #define FALSE 0
 
 /* 74HC595 control (address lines) */
-#define shiftLatchPin A1
-#define shiftClockPin A2
-#define shiftDataPin A0
-#define addressPinA10 13
+#define SHIFT_LATCH_PIN A1
+#define SHIFT_CLOCK_PIN A2
+#define SHIFT_DATA_PIN  A0
+#define ADDRESS_A10_PIN 13
 
 /* Data pins */
-#define dataB0 2
-#define dataB1 3
-#define dataB2 4
-#define dataB3 5
-#define dataB4 6
-#define dataB5 7
-#define dataB6 8
-#define dataB7 10
+#define DATA_B0_PIN 2
+#define DATA_B1_PIN 3
+#define DATA_B2_PIN 4
+#define DATA_B3_PIN 5
+#define DATA_B4_PIN 6
+#define DATA_B5_PIN 7
+#define DATA_B6_PIN 8
+#define DATA_B7_PIN 10
 
 /* Chip control */
-#define chipEnable A3
-#define outputEnable A4
-#define powerEnable A5 // For 27C16 and 27C32
-#define readVoltageEnable 13 // For 27C16
-#define programVoltageEnableC16 9 // For 27C16
-#define programVoltageEnableC32 12 // For 27C32 and 27C512
-#define programVoltageEnableOther 11 // For other
+#define CHIP_ENABLE_PIN   A3
+#define OUTPUT_ENABLE_PIN A4
+#define POWER_ENABLE_PIN  A5 // For 27C16 and 27C32
+#define READ_VOLTAGE_ENABLE_PIN 13 // For 27C16
+#define PROGRAMMING_VOLTAGE_ENABLE_C16_PIN   9 // For 27C16
+#define PROGRAMMING_VOLTAGE_ENABLE_C32_PIN   12 // For 27C32 and 27C512
+#define PROGRAMMING_VOLTAGE_ENABLE_OTHER_PIN 11 // For other
 
 /* Voltage control (for programming chips) */
-#define voltageControl A6
-#define rTop 10000.0
-#define rBottom 1500.0
+#define VOLTAGE_CONTROL_PIN A6
+#define RESISTOR_TOP_VALUE 9870.0
+#define RESISTOR_BOTTOM_VALUE 1482.0
 
-//#define MESSAGES
+// read buffer length
+#define BUF_LEN 16
 
-typedef enum chipType {
+// commands
+#define MESSAGE_COMMAND_FLAG        "!@#$"
+#define MESSAGE_SELECT_NONE         "NONE"
+#define MESSAGE_SELECT_C16          "C16 "
+#define MESSAGE_SELECT_C32          "C32 "
+#define MESSAGE_SELECT_C64          "C64 "
+#define MESSAGE_SELECT_C128         "C128"
+#define MESSAGE_SELECT_C256         "C256"
+#define MESSAGE_SELECT_C512         "C512"
+#define MESSAGE_VOLTAGE_INFO        "VINF"
+#define MESSAGE_READ_CHIP           "READ"
+#define MESSAGE_WRITE_CHIP          "WRIT"
+#define MESSAGE_RESPONSE_FLAG       "$#@!"
+#define MESSAGE_OK                  "OK  "
+#define MESSAGE_ERROR               "ERR "
+#define MESSAGE_BLOCK               "BLCK"
+#define MESSAGE_READ_BYTE           "RDBT"
+#define MESSAGE_WRITE_BYTE          "WRBT"
+
+typedef enum CHIP_TYPE {
   NONE = 0,
   C16 = 1,
   C32 = 2,
@@ -41,264 +61,413 @@ typedef enum chipType {
   C128 = 4,
   C256 = 5,
   C512 = 6
-} Chip;
+};
 
-typedef enum mode {
+typedef enum COMMAND_MODE {
   WAIT,
   READ,
   WRITE,
-  VOLTAGE
-} Modes;
+  VOLTAGE,
+  READ_BYTE,
+  WRITE_BYTE
+};
 
+void SetWriteMode(void);
+void SetReadMode(void);
+void SetAddress(uint16_t address);
+uint8_t GetData(void);
+void SetData(uint8_t data);
+uint8_t ReadByte(uint16_t address);
+void WriteByte(uint16_t address, uint8_t data);
+double GetVoltage(void);
+void SetProgrammingVoltage(bool enable);
+uint16_t GenerateAddress(uint16_t address);
+void SelectChip(CHIP_TYPE newChip);
+void WaitForData(void);
 
-void write_mode (void);
-void read_mode (void);
-void set_address (uint16_t address);
-uint8_t get_data (void);
-void set_data (uint8_t data);
-uint8_t read_byte (uint16_t address);
-void write_byte (uint16_t address, uint8_t data);
-float get_voltage (void);
-void program_voltage_set (bool state);
-uint16_t gen_address (uint16_t address);
-void select_chip (chipType new_chip);
+CHIP_TYPE ChipSelected = NONE;
+COMMAND_MODE CommandMode = WAIT;
+uint16_t StartAddress = 0x0000;
+uint16_t EndAddress = 0x0000;
+uint8_t ReadingBuffer[BUF_LEN];
+double programmingVoltage = 0.0;
 
-chipType chip = NONE;
-Modes mode = WAIT;
-uint8_t log_enable = FALSE;
-uint16_t start_address = 0x0000;
-uint16_t end_address = 0x0000;
-#define BUF_LEN 16
-uint8_t buf[BUF_LEN];
-
-void message(const char* mes){
-	if (log_enable)
-		Serial.println(mes);
-}
-
-void setup() {
+void setup() 
+{
   // 74HC595 (*2)
-  pinMode(shiftLatchPin, OUTPUT);
-  pinMode(shiftClockPin, OUTPUT);
-  pinMode(shiftDataPin, OUTPUT);
-  pinMode(addressPinA10, OUTPUT);
+  pinMode(SHIFT_LATCH_PIN, OUTPUT);
+  pinMode(SHIFT_CLOCK_PIN, OUTPUT);
+  pinMode(SHIFT_DATA_PIN,  OUTPUT);
+  pinMode(ADDRESS_A10_PIN, OUTPUT);
 
   // Chip control
-  pinMode(chipEnable, OUTPUT);
-  pinMode(outputEnable, OUTPUT);
-  pinMode(powerEnable, OUTPUT);
-  pinMode(readVoltageEnable, OUTPUT);
-  pinMode(programVoltageEnableC16, OUTPUT);
-  pinMode(programVoltageEnableC32, OUTPUT);
-  pinMode(programVoltageEnableOther, OUTPUT);
-  digitalWrite(outputEnable, HIGH);
-  digitalWrite(powerEnable, HIGH);
-  digitalWrite(readVoltageEnable, HIGH);
-  digitalWrite(programVoltageEnableC16, LOW);
-  digitalWrite(programVoltageEnableC32, LOW);
-  digitalWrite(programVoltageEnableOther, LOW);
-  digitalWrite(chipEnable, LOW);
+  pinMode(CHIP_ENABLE_PIN, OUTPUT);
+  pinMode(OUTPUT_ENABLE_PIN, OUTPUT);
+  pinMode(POWER_ENABLE_PIN, OUTPUT);
+  pinMode(READ_VOLTAGE_ENABLE_PIN, OUTPUT);
+  pinMode(PROGRAMMING_VOLTAGE_ENABLE_C16_PIN, OUTPUT);
+  pinMode(PROGRAMMING_VOLTAGE_ENABLE_C32_PIN, OUTPUT);
+  pinMode(PROGRAMMING_VOLTAGE_ENABLE_OTHER_PIN, OUTPUT);
+  digitalWrite(OUTPUT_ENABLE_PIN, HIGH);
+  digitalWrite(POWER_ENABLE_PIN, HIGH);
+  digitalWrite(READ_VOLTAGE_ENABLE_PIN, HIGH);
+  digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_C16_PIN, LOW);
+  digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_C32_PIN, LOW);
+  digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_OTHER_PIN, LOW);
+  digitalWrite(CHIP_ENABLE_PIN, LOW);
 
   // Data pins
-  read_mode();
+  SetReadMode();
 
   Serial.begin(115200);
-  Serial.println("Arduino 27 Series programmer");
+  Serial.println("Arduino 27CXXX EEPROM programmer");
 }
 
-void loop() {
-  switch (mode) {
+void loop() 
+{
+  switch(CommandMode) 
+  {
     case READ:
-      if (chip == NONE) {
-        mode = WAIT;
+      if(ChipSelected == NONE) 
+      {
+        CommandMode = WAIT;
         break;
       }
-      message("Read mode.");
-      read_mode();
-      if (chip == C16) digitalWrite(readVoltageEnable, LOW);
-      digitalWrite(chipEnable, LOW);
-      digitalWrite(outputEnable, LOW);
-      for (uint16_t i = start_address; i <= end_address; i++) {
-        uint8_t data = read_byte(i);
-        Serial.write(&data, sizeof(data));
-        if (i == end_address) break; // Защита от переполнения uint16
+
+      Serial.print(MESSAGE_RESPONSE_FLAG);
+      Serial.println(MESSAGE_READ_CHIP);
+      
+      SetReadMode();
+      
+      if(ChipSelected == C16) {
+        digitalWrite(READ_VOLTAGE_ENABLE_PIN, LOW);
       }
-      digitalWrite(outputEnable, HIGH);
-      digitalWrite(chipEnable, HIGH);
-      if (chip == C16) digitalWrite(readVoltageEnable, HIGH);
-      mode = WAIT;
+      digitalWrite(CHIP_ENABLE_PIN, LOW);
+      digitalWrite(OUTPUT_ENABLE_PIN, LOW);
+
+      uint8_t buffer[BUF_LEN];
+      for(uint16_t i = StartAddress; i < EndAddress; i += BUF_LEN) 
+      {
+        for(uint8_t j = 0; j < BUF_LEN; j++) {
+          buffer[j] = ReadByte(i + j);
+        }
+        Serial.write(buffer, BUF_LEN);
+      }
+      
+      digitalWrite(OUTPUT_ENABLE_PIN, HIGH);
+      digitalWrite(CHIP_ENABLE_PIN, HIGH);
+      
+      if(ChipSelected == C16) {
+        digitalWrite(READ_VOLTAGE_ENABLE_PIN, HIGH);
+      }
+
+      Serial.print(MESSAGE_RESPONSE_FLAG);
+      Serial.println(MESSAGE_OK);
+
+      CommandMode = WAIT;
       break;
     case WRITE:
-      if (chip == NONE) {
-        mode = WAIT;
+      if(ChipSelected == NONE) 
+      {
+        CommandMode = WAIT;
         break;
       }
-      message("Write mode");
-      /*for (int i = start_address; i <= end_address; i++) {
-        Serial.println(i, HEX);
-        write_byte(i, 0x89);
-        }*/
-      for (uint16_t i = start_address; i <= end_address; i += BUF_LEN) {
-        Serial.print("Write block ");
+
+      programmingVoltage = GetVoltage();
+      if(programmingVoltage <= 6.0)
+      {
+        Serial.print(MESSAGE_RESPONSE_FLAG);
+        Serial.print(MESSAGE_ERROR);
+        Serial.print("Low programming voltage (");
+        Serial.print(programmingVoltage, 2);
+        Serial.println("V)");
+        CommandMode = WAIT;
+        break;
+      }
+
+      Serial.print(MESSAGE_RESPONSE_FLAG);
+      Serial.println(MESSAGE_WRITE_CHIP);
+      
+      for(uint16_t i = StartAddress; i < EndAddress; i += BUF_LEN) 
+      {
+        Serial.print(MESSAGE_RESPONSE_FLAG);
+        Serial.print(MESSAGE_BLOCK);
         Serial.println(i);
-        uint8_t count = Serial.readBytes((char*)buf, BUF_LEN);
-        if (count != BUF_LEN) {
-          Serial.print("Error on block");
-          Serial.println(i);
-          Serial.print("Received ");
-          Serial.println(count);
+
+        WaitForData();
+  
+        uint8_t count = Serial.readBytes((char*)ReadingBuffer, BUF_LEN);
+        if(count != BUF_LEN) 
+        {
+          Serial.print(MESSAGE_RESPONSE_FLAG);
+          Serial.print(MESSAGE_ERROR);
+          Serial.print(count);
+          Serial.print(" bytes received for block 0x");
+          Serial.println(i, HEX);
+          CommandMode = WAIT;
           break;
         }
-        for (uint16_t j = 0; j < BUF_LEN; j++) {
+        
+        for(uint16_t j = 0; j < BUF_LEN; j++) 
+        {
 					// Write byte
-					write_mode();
-					program_voltage_set(true);
-          write_byte((i + j), buf[j]);
-					program_voltage_set(false);
+					SetWriteMode();
+					SetProgrammingVoltage(true);
+          WriteByte((i + j), ReadingBuffer[j]);
+					SetProgrammingVoltage(false);
 
 					// Verify byte
-					read_mode();
-					if (chip == C16) digitalWrite(readVoltageEnable, LOW);
-					digitalWrite(chipEnable, LOW);
-					digitalWrite(outputEnable, LOW);
-					uint8_t verify = get_data();
-					digitalWrite(outputEnable, HIGH);
-					digitalWrite(chipEnable, HIGH);
-					if (chip == C16) digitalWrite(readVoltageEnable, HIGH);
-					if (buf[j] != virify){
-						Serial.print("Error on address ");
-						Serial.println(i + j);
-						mode = WAIT;
+					SetReadMode();
+					if(ChipSelected == C16) {
+					  digitalWrite(READ_VOLTAGE_ENABLE_PIN, LOW);
+					}
+         
+					digitalWrite(CHIP_ENABLE_PIN, LOW);
+					digitalWrite(OUTPUT_ENABLE_PIN, LOW);
+					
+					uint8_t verify = GetData();
+         
+					digitalWrite(OUTPUT_ENABLE_PIN, HIGH);
+					digitalWrite(CHIP_ENABLE_PIN, HIGH);
+         
+					if(ChipSelected == C16) {
+					  digitalWrite(READ_VOLTAGE_ENABLE_PIN, HIGH);
+					}
+         
+					if(ReadingBuffer[j] != verify)
+					{
+            Serial.print(MESSAGE_RESPONSE_FLAG);
+            Serial.print(MESSAGE_ERROR);
+						Serial.print("Wrote 0x");
+            Serial.print(ReadingBuffer[j], HEX);
+            Serial.print(", read 0x");
+            Serial.print(verify, HEX);
+            Serial.print(", address 0x");
+						Serial.println(i + j, HEX);
+						CommandMode = WAIT;
+            break;
 					}
         }
-        Serial.print("Complete block ");
-        Serial.println(i);
-        if (i == end_address) break;
+
+        if(CommandMode != WRITE) {
+          break;
+        }
+        
+        Serial.print(MESSAGE_RESPONSE_FLAG);
+        Serial.println(MESSAGE_OK);
       }
-      message("Write success.");
-      mode = WAIT;
+      
+      CommandMode = WAIT;
       break;
+      
     case VOLTAGE:
-      Serial.print("Programming voltage: ");
-      Serial.println(get_voltage(), 1);
-      mode = WAIT;
+      Serial.print(MESSAGE_RESPONSE_FLAG);
+      Serial.print(MESSAGE_VOLTAGE_INFO);
+      Serial.println(GetVoltage(), 2);
+      CommandMode = WAIT;
       break;
+
+    case READ_BYTE:      
+      CommandMode = WAIT;
+      break;
+
+    case WRITE_BYTE:      
+      CommandMode = WAIT;
+      break;
+      
     default:
-      if (chip == NONE) message("Chip not selected!");
-      message("Wait commands...");
-      while (Serial.available()) Serial.read();
-      do {} while (Serial.available() == 0);
-      char incomingByte = Serial.read();
-      while (Serial.available()) Serial.read();
-      switch (incomingByte) {
-        case 'r': mode = READ; break;
-        case 'w': mode = WRITE; break;
-        case 'v': mode = VOLTAGE; break;
-        case 'a': select_chip(C16); break;
-        case 'b': select_chip(C32); break;
-        case 'c': select_chip(C64); break;
-        case 'd': select_chip(C128); break;
-        case 'e': select_chip(C256); break;
-        case 'f': select_chip(C512); break;
+      if(!Serial.available()) {
+        break;
+      }
+
+      uint8_t count = Serial.readBytes((char*)ReadingBuffer, BUF_LEN);
+      
+      while(Serial.available()) {
+        Serial.read();
+      }
+      
+      if(count) 
+      {
+        String command((char*)ReadingBuffer);
+        
+        int8_t commandFlagIndex = command.indexOf(MESSAGE_COMMAND_FLAG);
+        Serial.print(MESSAGE_RESPONSE_FLAG);
+        if(commandFlagIndex != -1)
+        {
+          if(command.indexOf(MESSAGE_SELECT_C16, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C16);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_C32, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C32);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_C64, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C64);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_C128, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C128);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_C256, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C256);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_C512, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(C512);
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_VOLTAGE_INFO, commandFlagIndex + 4) != -1) 
+          {
+            CommandMode = VOLTAGE;
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_READ_CHIP, commandFlagIndex + 4) != -1) 
+          {
+            CommandMode = READ;
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_WRITE_CHIP, commandFlagIndex + 4) != -1) 
+          {
+            CommandMode = WRITE;
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_READ_BYTE, commandFlagIndex + 4) != -1) 
+          {
+            CommandMode = READ_BYTE;
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_WRITE_BYTE, commandFlagIndex + 4) != -1) 
+          {
+            CommandMode = WRITE_BYTE;
+            Serial.println(MESSAGE_OK);
+          }
+          else if(command.indexOf(MESSAGE_SELECT_NONE, commandFlagIndex + 4) != -1) 
+          {
+            SelectChip(NONE);
+            Serial.println(MESSAGE_OK);
+          }
+          else {
+            Serial.println(MESSAGE_ERROR);
+          }
+        }
+        else {
+          Serial.println(MESSAGE_ERROR);
+        }
       }
   }
 }
 
-void select_chip (chipType new_chip) {
-  digitalWrite(powerEnable, HIGH);
-  switch (new_chip) {
+void WaitForData(void)
+{
+  unsigned long start = millis();
+  while(Serial.available() < 0)
+  {
+    if(millis() - start > 1000) {
+      break;
+    }
+    delay(10);
+  }
+}
+
+void SelectChip(CHIP_TYPE newChip) 
+{
+  ChipSelected = newChip;
+  digitalWrite(POWER_ENABLE_PIN, HIGH);
+  switch(newChip) 
+  {
     case C16:
-      digitalWrite(powerEnable, LOW);
-      chip = new_chip;
-      end_address = 0x07ff;
-			message("Select 27C16 chip.");
+      digitalWrite(POWER_ENABLE_PIN, LOW);
+      EndAddress = 0x07ff;
       break;
     case C32:
-      digitalWrite(powerEnable, LOW);
-      chip = new_chip;
-      end_address = 0x0fff;
-			message("Select 27C32 chip.");
+      digitalWrite(POWER_ENABLE_PIN, LOW);
+      EndAddress = 0x0fff;
       break;
     case C64:
-      chip = new_chip;
-      end_address = 0x1fff;
-			message("Select 27C64 chip.");
+      EndAddress = 0x1fff;
       break;
     case C128:
-      chip = new_chip;
-      end_address = 0x3fff;
-			message("Select 27C128 chip.");
+      EndAddress = 0x3fff;
       break;
     case C256:
-      chip = new_chip;
-      end_address = 0x7fff;
-			message("Select 27C256 chip.");
+      EndAddress = 0x7fff;
       break;
     case C512:
-      chip = C512;
-      end_address = 0xffff;
-			message("Select 27C512 chip.");
+      EndAddress = 0xffff;
       break;
     default:
-      chip = NONE;
-      end_address = 0x0000;
-			message("Chip not selected!");
+      ChipSelected = NONE;
+      EndAddress = 0x0000;
   }
 }
 
 
-void program_voltage_set (bool state) {
-  switch (chip) {
+void SetProgrammingVoltage(bool enable) 
+{
+  switch(ChipSelected) 
+  {
     case C16:
-      digitalWrite(programVoltageEnableC16, state);
+      digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_C16_PIN, enable);
       break;
     case C32:
     case C512:
-      digitalWrite(programVoltageEnableC32, state);
+      digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_C32_PIN, enable);
       break;
     case C64:
     case C128:
     case C256:
     default:
-      digitalWrite(programVoltageEnableOther, state);
+      digitalWrite(PROGRAMMING_VOLTAGE_ENABLE_OTHER_PIN, enable);
   }
 }
 
-void write_mode (void) {
-  pinMode(dataB0, OUTPUT);
-  pinMode(dataB1, OUTPUT);
-  pinMode(dataB2, OUTPUT);
-  pinMode(dataB3, OUTPUT);
-  pinMode(dataB4, OUTPUT);
-  pinMode(dataB5, OUTPUT);
-  pinMode(dataB6, OUTPUT);
-  pinMode(dataB7, OUTPUT);
+void SetWriteMode(void) 
+{
+  pinMode(DATA_B0_PIN, OUTPUT);
+  pinMode(DATA_B1_PIN, OUTPUT);
+  pinMode(DATA_B2_PIN, OUTPUT);
+  pinMode(DATA_B3_PIN, OUTPUT);
+  pinMode(DATA_B4_PIN, OUTPUT);
+  pinMode(DATA_B5_PIN, OUTPUT);
+  pinMode(DATA_B6_PIN, OUTPUT);
+  pinMode(DATA_B7_PIN, OUTPUT);
 }
 
-void read_mode (void) {
-  pinMode(dataB0, INPUT_PULLUP);
-  pinMode(dataB1, INPUT_PULLUP);
-  pinMode(dataB2, INPUT_PULLUP);
-  pinMode(dataB3, INPUT_PULLUP);
-  pinMode(dataB4, INPUT_PULLUP);
-  pinMode(dataB5, INPUT_PULLUP);
-  pinMode(dataB6, INPUT_PULLUP);
-  pinMode(dataB7, INPUT_PULLUP);
+void SetReadMode(void) 
+{
+  pinMode(DATA_B0_PIN, INPUT_PULLUP);
+  pinMode(DATA_B1_PIN, INPUT_PULLUP);
+  pinMode(DATA_B2_PIN, INPUT_PULLUP);
+  pinMode(DATA_B3_PIN, INPUT_PULLUP);
+  pinMode(DATA_B4_PIN, INPUT_PULLUP);
+  pinMode(DATA_B5_PIN, INPUT_PULLUP);
+  pinMode(DATA_B6_PIN, INPUT_PULLUP);
+  pinMode(DATA_B7_PIN, INPUT_PULLUP);
 }
 
-uint16_t gen_address (uint16_t address) {
+uint16_t GenerateAddress(uint16_t address) 
+{
   byte high = highByte(address);
   byte low = lowByte(address);
-  switch (chip) {
+  switch(ChipSelected) 
+  {
     case C16:
       break;
-      if (mode == READ) {
-        high |= 1 << 3; // A11 (C32+) is Vpp for C16 (5v for read)
-      }
-      break;
+//      if(CommandMode == READ) {
+//        high |= 1 << 3; // A11 (C32+) is Vpp for C16 (5v for read)
+//      }
+//      break;
     case C64:
     case C128:
-      if (mode == READ) {
+      if(CommandMode == READ) {
         high |= 1 << 6; // A14 (C256 and C512) is ~PGM for C64 and C128
       }
       break;
@@ -311,53 +480,59 @@ uint16_t gen_address (uint16_t address) {
   return (high << 8) | low;
 }
 
-void set_address (uint16_t address) {
-  address = gen_address(address);
-  digitalWrite(shiftLatchPin, LOW);
+void SetAddress(uint16_t address) 
+{
+  address = GenerateAddress(address);
+  digitalWrite(SHIFT_LATCH_PIN, LOW);
   byte registerTwo = highByte(address);
   byte registerOne = lowByte(address);
-  shiftOut(shiftDataPin, shiftClockPin, MSBFIRST, registerTwo);
-  shiftOut(shiftDataPin, shiftClockPin, MSBFIRST, registerOne);
-  digitalWrite(shiftLatchPin, HIGH);
+  shiftOut(SHIFT_DATA_PIN, SHIFT_CLOCK_PIN, MSBFIRST, registerTwo);
+  shiftOut(SHIFT_DATA_PIN, SHIFT_CLOCK_PIN, MSBFIRST, registerOne);
+  digitalWrite(SHIFT_LATCH_PIN, HIGH);
 }
 
-uint8_t get_data (void) {
+uint8_t GetData(void) 
+{
   uint8_t data = 0;
-  data |= digitalRead(dataB0) << 0;
-  data |= digitalRead(dataB1) << 1;
-  data |= digitalRead(dataB2) << 2;
-  data |= digitalRead(dataB3) << 3;
-  data |= digitalRead(dataB4) << 4;
-  data |= digitalRead(dataB5) << 5;
-  data |= digitalRead(dataB6) << 6;
-  data |= digitalRead(dataB7) << 7;
+  data |= digitalRead(DATA_B0_PIN) << 0;
+  data |= digitalRead(DATA_B1_PIN) << 1;
+  data |= digitalRead(DATA_B2_PIN) << 2;
+  data |= digitalRead(DATA_B3_PIN) << 3;
+  data |= digitalRead(DATA_B4_PIN) << 4;
+  data |= digitalRead(DATA_B5_PIN) << 5;
+  data |= digitalRead(DATA_B6_PIN) << 6;
+  data |= digitalRead(DATA_B7_PIN) << 7;
   return data;
 }
 
-void set_data (uint8_t data) {
-  digitalWrite(dataB0, (data & (1 << 0)));
-  digitalWrite(dataB1, (data & (1 << 1)));
-  digitalWrite(dataB2, (data & (1 << 2)));
-  digitalWrite(dataB3, (data & (1 << 3)));
-  digitalWrite(dataB4, (data & (1 << 4)));
-  digitalWrite(dataB5, (data & (1 << 5)));
-  digitalWrite(dataB6, (data & (1 << 6)));
-  digitalWrite(dataB7, (data & (1 << 7)));
+void SetData(uint8_t data)
+{
+  digitalWrite(DATA_B0_PIN, (data & (1 << 0)));
+  digitalWrite(DATA_B1_PIN, (data & (1 << 1)));
+  digitalWrite(DATA_B2_PIN, (data & (1 << 2)));
+  digitalWrite(DATA_B3_PIN, (data & (1 << 3)));
+  digitalWrite(DATA_B4_PIN, (data & (1 << 4)));
+  digitalWrite(DATA_B5_PIN, (data & (1 << 5)));
+  digitalWrite(DATA_B6_PIN, (data & (1 << 6)));
+  digitalWrite(DATA_B7_PIN, (data & (1 << 7)));
 }
 
-uint8_t read_byte (uint16_t address) {
-  set_address(address);
-  return get_data();
+uint8_t ReadByte(uint16_t address) 
+{
+  SetAddress(address);
+  return GetData();
 }
 
-void write_byte (uint16_t address, uint8_t data) {
-  set_address(address);
-  set_data(data);
-  switch (chip) {
+void WriteByte(uint16_t address, uint8_t data) 
+{
+  SetAddress(address);
+  SetData(data);
+  switch(ChipSelected) 
+  {
     case C16:
-      digitalWrite(chipEnable, HIGH);
+      digitalWrite(CHIP_ENABLE_PIN, HIGH);
       delay(15);
-      digitalWrite(chipEnable, LOW);
+      digitalWrite(CHIP_ENABLE_PIN, LOW);
       break;
     case C32:
     case C64:
@@ -365,15 +540,16 @@ void write_byte (uint16_t address, uint8_t data) {
     case C256:
     case C512:
     default:
-      digitalWrite(chipEnable, LOW);
+      digitalWrite(CHIP_ENABLE_PIN, LOW);
       delayMicroseconds(110);
-      digitalWrite(chipEnable, HIGH);
+      digitalWrite(CHIP_ENABLE_PIN, HIGH);
       break;
   }
 }
 
-float get_voltage (void) {
-  float vADC = (analogRead(voltageControl) / 1024.) * 5.;
-  float current = vADC / rBottom;
-  return (current * (rTop + rBottom));
+double GetVoltage(void) 
+{
+  double programmingVoltage = (analogRead(VOLTAGE_CONTROL_PIN) * 4.72) / 1024.;
+  programmingVoltage /= RESISTOR_BOTTOM_VALUE;
+  return (programmingVoltage * (RESISTOR_TOP_VALUE + RESISTOR_BOTTOM_VALUE));
 }

@@ -1,136 +1,300 @@
 #include "arduino.h"
-
 #include <QDebug>
 
-arduino::arduino(QSerialPort *port)
+//----------------------------------------------------------------------
+
+Arduino::Arduino(QSerialPort *port)
 {
     serialPort = port;
+    ResetVariables();
 }
+//----------------------------------------------------------------------
 
-
-void arduino::send(const QByteArray &data)
+void Arduino::ResetVariables(void)
 {
+    maxBufferSize = 0;
+    readBuffer.clear();
+    writeBuffer.clear();
+}
+//----------------------------------------------------------------------
+
+int Arduino::GetChipSize(void)
+{
+    return maxBufferSize;
+}
+//----------------------------------------------------------------------
+
+QByteArray *Arduino::GetReadBuffer(void)
+{
+    return &readBuffer;
+}
+//----------------------------------------------------------------------
+
+void Arduino::Send(const QByteArray &data)
+{
+    emit SerialOperationStartSignal();
     serialPort->write(data);
 }
+//----------------------------------------------------------------------
 
-void arduino::recieve()
+void Arduino::ReadChip(void)
 {
-    while (!serialPort->atEnd()) {
-        buffer.append(serialPort->read(100));
-        emit blockComplete(buffer.length());
-        //qDebug() << "readed data: " << buffer.length();
-    }
-    if (buffer.length() >= bufSize)
-        emit readComplete(buffer);
+    readBuffer.clear();
+    serialDataConnection = QObject::connect(serialPort, SIGNAL(readyRead()), this, SLOT(ReadChipSlot()));
+    Send(MESSAGE_READ_CHIP);
 }
+//----------------------------------------------------------------------
 
-void arduino::selectChip(chip type)
+void Arduino::ReadChipSlot(void)
 {
-    switch(type){
-    case NONE:
-        bufSize = 0;
-        break;
-    case C16:
-        bufSize = 0x07ff + 1;
-        send("a");
-        break;
-    case C32:
-        bufSize = 0x0fff + 1;
-        send("b");
-        break;
-    case C64:
-        bufSize = 0x1fff + 1;
-        send("c");
-        break;
-    case C128:
-        bufSize = 0x3fff + 1;
-        send("d");
-        break;
-    case C256:
-        bufSize = 0x7fff + 1;
-        send("e");
-        break;
-    case C512:
-        bufSize = 0xffff + 1;
-        send("f");
-        break;
-    }
-    emit chipUpdated(bufSize);
+    while (!serialPort->atEnd()) 
+    {
+        QByteArray readData = serialPort->read(64);
+        QString str = RESPONSE_OK;
+        str.append("\r\n");
 
-}
+        int index = 0;
+        if((index = readData.indexOf(str, 0)) != -1)
+        {
+            readData.remove(readBuffer.length() ? index : 0, (readBuffer.length() ? 0 : index) + str.length());
 
-uint32_t arduino::getChipSize()
-{
-    return bufSize;
-}
+            str = RESPONSE_READ_CHIP;
+            str.append("\r\n");
 
-void arduino::readChip()
-{
-    buffer.clear();
-    serialDataConnection = QObject::connect(serialPort, SIGNAL(readyRead()), this, SLOT(recieve()));
-    send("r");
-    /*
-    static uint32_t count = 0;
-    const QByteArray data = serialPort->readAll();
-    if (data.count()){
-        memcpy(&(bufWork.data())[count], data.data(), data.count());
-        count += data.count();
-    }
-    ui->progressBar->setValue(count);
-    if (count >= bufSize){
-        ui->progressBar->setValue(bufSize);
-        QObject::disconnect(serialDataConnection);
-        updateButtons(true, true);
-
-        log(QString("Readed %1 bytes.").arg(count));
-        count = 0;
-
-        emit readComplete(data);
-        //emit bufferUpdated();
-    }
-*/
-}
-
-void arduino::writeChip(QByteArray data)
-{
-    QByteArray ack;
-    QByteArray buf;
-    buf.clear();
-
-    // +1 нужен для записи последнего блока
-    for (uint32_t i = 0; i <= bufSize; i++){
-        buf.append(data[i]);
-        if (i && ((i & 0xf) == 0)){
-            // 16 bytes block
-            send(buf);
-            buf.clear();
-            ack = serialPort->readAll();
-            ack.clear();
-
-            if (bufSize == 2048){
-                // Correct time to 27C16
-                while (serialPort->waitForReadyRead(320)){
-                    ack.append(serialPort->readAll());
-                }
-            } else {
-                while (serialPort->waitForReadyRead(20)){
-                    ack.append(serialPort->readAll());
-                }
+            if((index = readData.indexOf(str, 0)) != -1) {
+                readData.remove(0, index + str.length());
             }
-            if (ack.indexOf("Complete block ") == -1){
-                uint16_t address = 0;
-                uint8_t value = 0xff;
-                emit writeError(address, value);
+        }
+
+        readBuffer.append(readData);
+        emit ReadBlockSignal(static_cast<uint16_t>(readBuffer.length()));
+    }
+    if (readBuffer.length() >= maxBufferSize) 
+    {
+        if(readBuffer.length() > maxBufferSize) {
+            readBuffer.resize(maxBufferSize);
+        }
+        QObject::disconnect(serialDataConnection);
+        emit ReadCompleteSignal();
+        emit SerialOperationCompleteSignal();
+    }
+}
+//----------------------------------------------------------------------
+
+void Arduino::WriteChip(QByteArray data)
+{
+    writeBuffer.clear();
+    writeBuffer.append(data);
+    if(writeBuffer.length() != maxBufferSize)
+    {
+        QString errorMessage = "Invalid data length of ";
+        errorMessage.append(QString::number(writeBuffer.length()));
+        emit WriteErrorSignal(0, reinterpret_cast<char *>(errorMessage.data()));
+        return;
+    }
+
+    serialDataConnection = QObject::connect(serialPort, SIGNAL(readyRead()), this, SLOT(WriteChipSlot()));
+    Send(MESSAGE_WRITE_CHIP);
+}
+//----------------------------------------------------------------------
+
+void Arduino::WriteChipSlot(void)
+{
+    QByteArray readData;
+    QObject::disconnect(serialDataConnection);
+    while(!serialPort->atEnd())
+    {
+        readData = serialPort->readAll();
+
+        QString str = RESPONSE_OK;
+        str.append("\r\n");
+
+        int index = 0;
+        if((index = readData.indexOf(str, 0)) != -1)
+        {
+            str = RESPONSE_ERROR;
+
+            if((index = readData.indexOf(str, 0)) != -1)
+            {
+                serialPort->waitForReadyRead(100);
+                readData.append(serialPort->readAll());
+                readData.remove(0, index + str.length());
+                emit WriteErrorSignal(0, readData.data());
+                emit SerialOperationCompleteSignal();
                 return;
+            }
+
+            str = RESPONSE_WRITE_CHIP;
+            str.append("\r\n");
+
+            if((index = readData.indexOf(str, 0)) != -1)
+            {
+                readData.remove(0, index + str.length());
+                break;
             }
         }
     }
-    emit writeComplete();
-}
 
-void arduino::voltageMesurment(bool enable)
+    serialPort->waitForReadyRead(100);
+
+    for(int i = 0; i < maxBufferSize; i += 16)
+    {
+        readData.append(serialPort->readAll());
+
+        QString str = RESPONSE_BLOCK_REQUEST;
+        int index = 0, blockIndex = 0;
+        if((index = readData.indexOf(str, 0)) != -1)
+        {
+            readData.remove(0, index + str.length());
+            blockIndex = QString(readData).simplified().toInt();
+        }
+        else
+        {
+            QString errorMessage = "Invalid acknowledge data received";
+            emit WriteErrorSignal(0, reinterpret_cast<char *>(errorMessage.data()));
+            emit SerialOperationCompleteSignal();
+            break;
+        }
+
+        if(i != blockIndex)
+        {
+            QString errorMessage = "Invalid block ";
+            errorMessage.append(QString::number(blockIndex, 16));
+            errorMessage.append(" received, expected ");
+            errorMessage.append(QString::number(i, 16));
+            emit WriteErrorSignal(0, reinterpret_cast<char *>(errorMessage.data()));
+            emit SerialOperationCompleteSignal();
+            break;
+        }
+
+        char data[16];
+        memcpy(data, &writeBuffer.data()[i], 16);
+
+        serialPort->write(data, 16);
+
+        serialPort->waitForReadyRead(selectedChipType == C16 ? 320 : 20);
+        readData.clear();
+        readData.append(serialPort->readAll());
+
+        str = RESPONSE_ERROR;
+
+        if((index = readData.indexOf(str, 0)) != -1)
+        {
+            serialPort->waitForReadyRead(100);
+            readData.append(serialPort->readAll());
+            readData.remove(0, index + str.length());
+            emit WriteErrorSignal(0, readData.data());
+            emit SerialOperationCompleteSignal();
+            return;
+        }
+
+        str = RESPONSE_OK;
+        str.append("\r\n");
+
+        if((index = readData.indexOf(str, 0)) == -1) {
+            serialPort->waitForReadyRead(100);
+        }
+
+        if((index = readData.indexOf(str, 0)) == -1)
+        {
+            QString errorMessage = "Can't acknwledge block ";
+            errorMessage.append(QString::number(i, 16));
+            emit WriteErrorSignal(0, reinterpret_cast<char *>(errorMessage.data()));
+            emit SerialOperationCompleteSignal();
+        }
+        readData.remove(0, index + str.length());
+
+        emit WriteBlockSignal(static_cast<uint16_t>(i));
+    }
+
+    emit WriteCompleteSignal();
+    emit SerialOperationCompleteSignal();
+}
+//----------------------------------------------------------------------
+
+void Arduino::SelectChip(CHIP_TYPE type)
 {
-    if (enable) {
-        send("v");
+    serialDataConnection = QObject::connect(serialPort, SIGNAL(readyRead()), this, SLOT(SelectChipSlot()));
+
+    switch(type)
+    {
+        case C16:
+            maxBufferSize = 0x07FF + 1;
+            Send(MESSAGE_SELECT_C16);
+            break;
+        case C32:
+            maxBufferSize = 0x0FFF + 1;
+            Send(MESSAGE_SELECT_C32);
+            break;
+        case C64:
+            maxBufferSize = 0x1FFF + 1;
+            Send(MESSAGE_SELECT_C64);
+            break;
+        case C128:
+            maxBufferSize = 0x3FFF + 1;
+            Send(MESSAGE_SELECT_C128);
+            break;
+        case C256:
+            maxBufferSize = 0x7FFF + 1;
+            Send(MESSAGE_SELECT_C256);
+            break;
+        case C512:
+            maxBufferSize = 0xFFFF + 1;
+            Send(MESSAGE_SELECT_C512);
+            break;
+        default:
+            maxBufferSize = 0;
+            Send(MESSAGE_SELECT_NONE);
+    }
+
+    selectedChipType = type;
+}
+//----------------------------------------------------------------------
+
+void Arduino::SelectChipSlot(void)
+{
+    while(!serialPort->atEnd())
+    {
+        QByteArray readData = serialPort->readAll();
+        if(readData.indexOf(RESPONSE_OK, 0) != -1)
+        {
+            QObject::disconnect(serialDataConnection);
+            emit SerialOperationCompleteSignal();
+        }
     }
 }
+//----------------------------------------------------------------------
+
+void Arduino::ReadVoltage(void)
+{
+    serialDataConnection = QObject::connect(serialPort, SIGNAL(readyRead()), this, SLOT(ReadVoltageSlot()));
+    Send(MESSAGE_VOLTAGE_INFO);
+}
+//----------------------------------------------------------------------
+
+void Arduino::ReadVoltageSlot(void)
+{
+    while(!serialPort->atEnd())
+    {
+        QByteArray readData = serialPort->readAll();
+
+        QString str = RESPONSE_OK;
+        str.append("\r\n");
+
+        int index = 0;
+        if((index = readData.indexOf(str, 0)) != -1)
+        {
+            readData.remove(0, index + str.length());
+            str = RESPONSE_VOLTAGEINFO;
+            if((index = readData.indexOf(str, 0)) != -1)
+            {
+                readData.remove(0, index + str.length());
+                QObject::disconnect(serialDataConnection);
+                emit VoltageUpdatedSignal(QString(readData).simplified().toDouble() * 100);
+                emit SerialOperationCompleteSignal();
+            }
+        }
+    }
+}
+//----------------------------------------------------------------------
+//----------------------------------------------------------------------

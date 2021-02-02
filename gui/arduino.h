@@ -1,27 +1,48 @@
 #ifndef ARDUINO_H
 #define ARDUINO_H
-
+//----------------------------------------------------------------------
 #include <QObject>
 #include <QSerialPort>
+//----------------------------------------------------------------------
 
-class arduino : public QObject
+class Arduino : public QObject
 {
     Q_OBJECT
 
 private:
-    uint32_t bufSize;
-    QByteArray buffer;
-    QSerialPort *serialPort = NULL;
+    const char *MESSAGE_SELECT_NONE    = "!@#$NONE";
+    const char *MESSAGE_SELECT_C16     = "!@#$C16 ";
+    const char *MESSAGE_SELECT_C32     = "!@#$C32 ";
+    const char *MESSAGE_SELECT_C64     = "!@#$C64 ";
+    const char *MESSAGE_SELECT_C128    = "!@#$C128";
+    const char *MESSAGE_SELECT_C256    = "!@#$C256";
+    const char *MESSAGE_SELECT_C512    = "!@#$C512";
+    const char *MESSAGE_VOLTAGE_INFO   = "!@#$VINF";
+    const char *MESSAGE_READ_CHIP      = "!@#$READ";
+    const char *MESSAGE_WRITE_CHIP     = "!@#$WRIT";
+    const char *RESPONSE_READ_CHIP     = "$#@!READ";
+    const char *RESPONSE_WRITE_CHIP    = "$#@!WRIT";
+    const char *RESPONSE_ERROR         = "$#@!ERR ";
+    const char *RESPONSE_BLOCK_REQUEST = "$#@!BLCK";
+    const char *RESPONSE_OK            = "$#@!OK  ";
+    const char *RESPONSE_VOLTAGEINFO   = "$#@!VINF";
+
+    int maxBufferSize = 0;
+    QByteArray readBuffer;
+    QByteArray writeBuffer;
+    QSerialPort *serialPort = nullptr;
     QMetaObject::Connection serialDataConnection;
 
-
-    void send(const QByteArray &data);
+    void Send(const QByteArray &data);
 
 private slots:
-    void recieve();
+    void SelectChipSlot(void);
+    void ReadChipSlot(void);
+    void WriteChipSlot(void);
+    void ReadVoltageSlot(void);
 
 public:
-    enum chip {
+    enum CHIP_TYPE {
         NONE,
         C16,
         C32,
@@ -31,23 +52,28 @@ public:
         C512
     };
 
-    explicit arduino(QSerialPort *port);
-    uint32_t getChipSize();
-    void selectChip(chip type);
-    void readChip();
-    void writeChip(QByteArray data);
-    void voltageMesurment(bool enable);
-
+    explicit Arduino(QSerialPort *);
+    int GetChipSize(void);
+    QByteArray *GetReadBuffer(void);
+    void SelectChip(CHIP_TYPE);
+    void ReadChip(void);
+    void WriteChip(QByteArray);
+    void ReadVoltage(void);
+    void ResetVariables(void);
 
 signals:
-    void chipUpdated(uint32_t size);
-    void blockComplete(uint32_t address);
-    void readComplete(QByteArray data);
-    void readError(uint16_t address, uint8_t value);
-    void writeComplete();
-    void writeError(uint16_t address, uint8_t value);
-    void voltage(float v);
+    void ReadBlockSignal(uint16_t);
+    void ReadCompleteSignal(void);
+    void WriteBlockSignal(uint16_t);
+    void WriteCompleteSignal(void);
+    void WriteErrorSignal(uint16_t, char *);
+    void VoltageUpdatedSignal(double);
+    void SerialOperationStartSignal(void);
+    void SerialOperationCompleteSignal(void);
+
+private:
+    CHIP_TYPE selectedChipType = CHIP_TYPE::NONE;
 
 };
-
+//----------------------------------------------------------------------
 #endif // ARDUINO_H
