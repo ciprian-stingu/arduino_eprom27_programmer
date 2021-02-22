@@ -172,7 +172,7 @@ void Arduino::WriteChipSlot(void)
 
         serialPort->write(data, 16);
 
-        serialPort->waitForReadyRead(selectedChipType == C16 ? 320 : 20);
+        serialPort->waitForReadyRead(selectedChipType == C16 ? 320 : 100);
         readData.clear();
         readData.append(serialPort->readAll());
 
@@ -192,12 +192,12 @@ void Arduino::WriteChipSlot(void)
         str.append("\r\n");
 
         if((index = readData.indexOf(str, 0)) == -1) {
-            serialPort->waitForReadyRead(100);
+            serialPort->waitForReadyRead(250);
         }
 
         if((index = readData.indexOf(str, 0)) == -1)
         {
-            QString errorMessage = "Can't acknwledge block ";
+            QString errorMessage = "Can't acknowledge block ";
             errorMessage.append(QString::number(i, 16));
             emit WriteErrorSignal(0, reinterpret_cast<char *>(errorMessage.data()));
             emit SerialOperationCompleteSignal();
